@@ -1,181 +1,222 @@
-import TicketApi from './TicketApi';
-import { createModal, createTicketForm, createConfirmDialog } from './Modal';
+import { TicketApi } from './TicketApi.js';
+import { Modal, createTicketForm, createConfirmDialog } from './Modal.js';
 
-export default class HelpDeskApp {
+export class HelpDeskApp {
   constructor() {
-    this.ticketsList = document.getElementById('ticketsList');
-    this.loading = document.getElementById('loading');
-    this.addBtn = document.getElementById('addTicketBtn');
-    this.expandedTicketId = null;
-    this.addBtn.addEventListener('click', () => this.showAddModal());
-    this.loadTickets();
+    this.api = new TicketApi();
+    this.modal = new Modal();
+    this.tickets = [];
+
+    this.init();
+  }
+
+  async init() {
+    await this.loadTickets();
+    this.setupEventListeners();
   }
 
   async loadTickets() {
-    this.loading.style.display = 'flex';
-    this.ticketsList.innerHTML = '';
     try {
-      const tickets = await TicketApi.getAllTickets();
-      this.renderTickets(tickets);
+      this.tickets = await TicketApi.getAllTickets();
+      this.renderTickets();
     } catch (e) {
-      console.error(e);
-      this.ticketsList.innerHTML = '<li style="padding:16px;color:#999;text-align:center;">Не удалось загрузить тикеты. Проверьте, что сервер запущен.</li>';
-    } finally {
-      this.loading.style.display = 'none';
+      console.error('Failed to load tickets:', e);
     }
   }
 
-  renderTickets(tickets) {
-    this.ticketsList.innerHTML = '';
-    tickets.forEach((ticket) => {
-      const li = document.createElement('li');
-      li.className = 'ticket';
-      li.dataset.id = ticket.id;
+  renderTickets() {
+    const container = document.querySelector('.tickets-list');
+    if (!container) return;
+    container.innerHTML = '';
 
-      const status = document.createElement('div');
-      status.className = 'ticket-status' + (ticket.status ? ' done' : '');
-      status.addEventListener('click', (e) => { e.stopPropagation(); this.toggleStatus(ticket); });
+    this.tickets.forEach((ticket) => {
+      const ticketEl = document.createElement('div');
+      ticketEl.className = 'ticket';
+      ticketEl.dataset.id = ticket.id;
 
-      const name = document.createElement('div');
-      name.className = 'ticket-name' + (ticket.status ? ' done' : '');
-      name.textContent = ticket.name;
+      const statusClass = ticket.status ? 'ticket-status-done' : 'ticket-status-todo';
+      const statusText = ticket.status ? '\u2713' : '';
 
-      const date = document.createElement('div');
-      date.className = 'ticket-date';
-      date.textContent = this.formatDate(ticket.created);
-
-      const actions = document.createElement('div');
-      actions.className = 'ticket-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.className = 'ticket-btn edit';
-      editBtn.textContent = '\u270E';
-      editBtn.title = 'Редактировать';
-      editBtn.addEventListener('click', (e) => { e.stopPropagation(); this.showEditModal(ticket); });
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'ticket-btn delete';
-      deleteBtn.textContent = '\u00D7';
-      deleteBtn.title = 'Удалить';
-      deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this.showDeleteModal(ticket); });
-
-      actions.appendChild(editBtn);
-      actions.appendChild(deleteBtn);
-      li.appendChild(status);
-      li.appendChild(name);
-      li.appendChild(date);
-      li.appendChild(actions);
-      li.addEventListener('click', () => this.toggleDetails(ticket, li));
-      this.ticketsList.appendChild(li);
-
-      const details = document.createElement('div');
-      details.className = 'ticket-details';
-      details.dataset.id = ticket.id;
-      this.ticketsList.appendChild(details);
+      ticketEl.innerHTML = `
+        <div class="ticket-status ${statusClass}" data-action="toggle">${statusText}</div>
+        <div class="ticket-body" data-action="details">
+          <div class="ticket-name">${this.escapeHtml(ticket.name)}</div>
+          <div class="ticket-description" style="display:none;"></div>
+        </div>
+        <div class="ticket-date">${this.formatDate(ticket.created)}</div>
+        <div class="ticket-actions">
+          <button class="btn-edit" data-action="edit">\u270E</button>
+          <button class="btn-delete" data-action="delete">\u2716</button>
+        </div>
+      `;
+      container.appendChild(ticketEl);
     });
   }
 
-  async toggleDetails(ticket, li) {
-    const detailsEl = this.ticketsList.querySelector(`.ticket-details[data-id="${ticket.id}"]`);
-    if (this.expandedTicketId === ticket.id) {
-      detailsEl.classList.remove('open');
-      this.expandedTicketId = null;
-      return;
-    }
-    if (this.expandedTicketId) {
-      const prev = this.ticketsList.querySelector(`.ticket-details[data-id="${this.expandedTicketId}"]`);
-      if (prev) prev.classList.remove('open');
-    }
-    detailsEl.textContent = 'Загрузка...';
-    detailsEl.classList.add('open');
-    this.expandedTicketId = ticket.id;
-    try {
-      const full = await TicketApi.getTicketById(ticket.id);
-      detailsEl.textContent = full.description || 'Описание отсутствует';
-    } catch (e) {
-      detailsEl.textContent = 'Не удалось загрузить описание';
+  setupEventListeners() {
+    const container = document.querySelector('.tickets-list');
+    if (!container) return;
+
+    container.addEventListener('click', async (e) => {
+      const action = e.target.dataset.action;
+      const ticketEl = e.target.closest('.ticket');
+      if (!action || !ticketEl) return;
+
+      const ticketId = ticketEl.dataset.id;
+      const ticket = this.tickets.find((t) => String(t.id) === String(ticketId));
+      if (!ticket) return;
+
+      switch (action) {
+        case 'toggle':
+          await this.toggleStatus(ticket);
+          break;
+        case 'edit':
+          this.openEditModal(ticket);
+          break;
+        case 'delete':
+          this.openDeleteModal(ticket);
+          break;
+        case 'details':
+          await this.toggleDetails(ticketEl, ticket);
+          break;
+      }
+    });
+
+    const addBtn = document.querySelector('.btn-add-ticket');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => this.openCreateModal());
     }
   }
 
   async toggleStatus(ticket) {
     try {
+      // ОТПРАВЛЯЕМ ТОЛЬКО ИЗМЕНЯЕМОЕ ПОЛЕ — не трогаем description
       await TicketApi.updateTicket(ticket.id, {
-        id: ticket.id, name: ticket.name, description: '',
-        status: !ticket.status, created: ticket.created,
+        status: !ticket.status
       });
-      this.loadTickets();
-    } catch (e) { console.error(e); }
+      await this.loadTickets();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  showAddModal() {
-    const formHtml = createTicketForm();
-    const modal = createModal('Добавить тикет', formHtml, [
-      { text: 'Отмена', className: 'btn-cancel', onClick: () => modal.close() },
-      {
-        text: 'Сохранить', className: 'btn-save',
-        onClick: async () => {
-          const name = document.getElementById('ticketName').value.trim();
-          const description = document.getElementById('ticketDescription').value.trim();
-          if (!name) { alert('Введите краткое описание'); return; }
-          try {
-            await TicketApi.createTicket({ id: null, name, description, status: false, created: Date.now() });
-            modal.close();
-            this.loadTickets();
-          } catch (e) { alert('Не удалось создать тикет. Проверьте, что сервер запущен.'); }
-        }
+  async toggleDetails(ticketEl, ticket) {
+    const descEl = ticketEl.querySelector('.ticket-description');
+    if (descEl.style.display === 'none') {
+      try {
+        const fullTicket = await TicketApi.getTicketById(ticket.id);
+        descEl.textContent = fullTicket.description || 'Описание отсутствует';
+        descEl.style.display = 'block';
+      } catch (e) {
+        console.error(e);
       }
-    ]);
+    } else {
+      descEl.style.display = 'none';
+    }
   }
 
-  async showEditModal(ticket) {
-    let description = '';
-    try {
-      const full = await TicketApi.getTicketById(ticket.id);
-      description = full.description || '';
-    } catch (e) { console.error(e); }
-    const formHtml = createTicketForm(ticket.name, description);
-    const modal = createModal('Редактировать тикет', formHtml, [
-      { text: 'Отмена', className: 'btn-cancel', onClick: () => modal.close() },
-      {
-        text: 'Сохранить', className: 'btn-save',
-        onClick: async () => {
-          const name = document.getElementById('ticketName').value.trim();
-          const desc = document.getElementById('ticketDescription').value.trim();
-          if (!name) { alert('Введите краткое описание'); return; }
-          try {
-            await TicketApi.updateTicket(ticket.id, { id: ticket.id, name, description: desc, status: ticket.status, created: ticket.created });
-            modal.close();
-            this.loadTickets();
-          } catch (e) { alert('Не удалось обновить тикет.'); }
-        }
-      }
-    ]);
+  openCreateModal() {
+  const html = `
+    ${createTicketForm()}
+    <div class="modal-buttons">
+      <button class="btn-cancel">Отмена</button>
+      <button class="btn-save">Сохранить</button>
+    </div>
+  `;
+
+ 
+  this.modal.show(html, 'Новый тикет');
+
+  const cancelBtn = this.modal.getCancelButton();
+  const saveBtn = this.modal.getSaveButton();
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => this.modal.close());
   }
 
-  showDeleteModal(ticket) {
-    const html = createConfirmDialog(`Удалить тикет "${ticket.name}"?`);
-    const modal = createModal('Удалить тикет', html, [
-      { text: 'Отмена', className: 'btn-cancel', onClick: () => modal.close() },
-      {
-        text: 'Удалить', className: 'btn-delete-confirm',
-        onClick: async () => {
-          try {
-            await TicketApi.deleteTicket(ticket.id);
-            modal.close();
-            this.loadTickets();
-          } catch (e) { alert('Не удалось удалить тикет.'); }
-        }
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const nameInput = this.modal.getNameInput();
+      const descInput = this.modal.getDescriptionInput();
+
+      if (!nameInput || !nameInput.value.trim()) {
+        alert('Название обязательно');
+        return;
       }
-    ]);
+
+      try {
+        await TicketApi.createTicket({
+          name: nameInput.value.trim(),
+          description: descInput ? descInput.value.trim() : ''
+        });
+        await this.loadTickets();
+        this.modal.close();
+      } catch (e) {
+        console.error('Ошибка создания тикета', e);
+        alert('Не удалось сохранить тикет (проверь консоль)');
+      }
+    });
+  }
+}
+
+  openEditModal(ticket) {
+    const html = `
+      ${createTicketForm(ticket.name, ticket.description)}
+      <div class="modal-buttons">
+        <button class="btn-cancel">Отмена</button>
+        <button class="btn-save">Сохранить</button>
+      </div>
+    `;
+
+    this.modal.show(html, null);
+
+    this.modal.getCancelButton().addEventListener('click', () => this.modal.close());
+    this.modal.getSaveButton().addEventListener('click', async () => {
+      const name = this.modal.getNameInput().value.trim();
+      const description = this.modal.getDescriptionInput().value.trim();
+      if (!name) return;
+
+      try {
+        await TicketApi.updateTicket(ticket.id, { name, description });
+        await this.loadTickets();
+        this.modal.close();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  }
+
+  openDeleteModal(ticket) {
+    const html = `
+      ${createConfirmDialog('Удалить тикет? Это действие нельзя отменить.')}
+      <div class="modal-buttons">
+        <button class="btn-cancel">Отмена</button>
+        <button class="btn-save">Удалить</button>
+      </div>
+    `;
+
+    this.modal.show(html, null);
+
+    this.modal.getCancelButton().addEventListener('click', () => this.modal.close());
+    this.modal.getSaveButton().addEventListener('click', async () => {
+      try {
+        await TicketApi.deleteTicket(ticket.id);
+        await this.loadTickets();
+        this.modal.close();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  }
+
+  escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   formatDate(timestamp) {
     const d = new Date(timestamp);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, '0');
-    const mins = String(d.getMinutes()).padStart(2, '0');
-    return `${day}.${month}.${year} ${hours}:${mins}`;
+    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   }
 }

@@ -1,33 +1,70 @@
-export function createModal(title, contentHtml, actions) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  const h2 = document.createElement('h2');
-  h2.textContent = title;
-  modal.appendChild(h2);
-  const content = document.createElement('div');
-  content.innerHTML = contentHtml;
-  modal.appendChild(content);
-  const actionsDiv = document.createElement('div');
-  actionsDiv.className = 'modal-actions';
-  actions.forEach(({ text, className, onClick }) => {
-    const btn = document.createElement('button');
-    btn.className = `btn ${className}`;
-    btn.textContent = text;
-    btn.addEventListener('click', onClick);
-    actionsDiv.appendChild(btn);
-  });
-  modal.appendChild(actionsDiv);
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-  return { close() { overlay.remove(); }, overlay };
-}
+export class Modal {
+  constructor() {
+    // Контейнер модалки должен быть в HTML заранее, например:
+    // <div id="app-modal" class="modal-container" style="display:none;"></div>
+    this.container = document.getElementById('app-modal');
+    if (!this.container) {
+      console.error('Не найден #app-modal в HTML. Добавь его в index.html');
+      return;
+    }
 
-export function createTicketForm(name = '', description = '') {
-  return `<div class="form-group"><label for="ticketName">Краткое описание</label><input type="text" id="ticketName" value="${name.replace(/"/g, '&quot;')}" placeholder="Что нужно сделать"></div><div class="form-group"><label for="ticketDescription">Подробное описание</label><textarea id="ticketDescription" rows="4" placeholder="Детали...">${description}</textarea></div>`;
-}
+    this.overlay = null;
+    this.contentEl = null;
+  }
 
-export function createConfirmDialog(message) {
-  return `<p>${message}</p>`;
+  show(htmlContent, title) {
+    // 1. Создаём оверлей (фон)
+    this.overlay = document.createElement('div');
+    this.overlay.className = 'modal-overlay';
+    
+    // 2. Создаём контент
+    this.contentEl = document.createElement('div');
+    this.contentEl.className = 'modal-content';
+    if (title) {
+      const header = document.createElement('h3');
+      header.textContent = title;
+      this.contentEl.appendChild(header);
+    }
+    this.contentEl.innerHTML = htmlContent;
+
+    // Собираем всё вместе
+    this.container.innerHTML = ''; // очищаем старый контент
+    this.container.appendChild(this.overlay);
+    this.container.appendChild(this.contentEl);
+    this.container.style.display = 'flex';
+
+    // 3. Вешаем закрытие по оверлею
+    this.overlay.addEventListener('click', () => this.close());
+
+    // 4. Вешаем закрытие по Esc
+    this.escHandler = (e) => {
+      if (e.key === 'Escape') this.close();
+    };
+    document.addEventListener('keydown', this.escHandler);
+
+    // Фокус на первое поле, чтобы UX был лучше
+    const firstInput = this.contentEl.querySelector('input, textarea');
+    if (firstInput) firstInput.focus();
+  }
+
+  close() {
+    if (this.container) this.container.style.display = 'none';
+    if (this.escHandler) document.removeEventListener('keydown', this.escHandler);
+    this.overlay = null;
+    this.contentEl = null;
+  }
+
+  // Хелперы, чтобы твой openCreateModal мог найти кнопки
+  getCancelButton() {
+    return this.contentEl?.querySelector('.btn-cancel');
+  }
+  getSaveButton() {
+    return this.contentEl?.querySelector('.btn-save');
+  }
+  getNameInput() {
+    return this.contentEl?.querySelector('#ticketName');
+  }
+  getDescriptionInput() {
+    return this.contentEl?.querySelector('#ticketDescription');
+  }
 }
