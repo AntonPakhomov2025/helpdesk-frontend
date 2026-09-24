@@ -1,5 +1,6 @@
 import { TicketApi } from './TicketApi.js';
-import { Modal, createTicketForm, createConfirmDialog } from './Modal.js';
+import { Modal } from './Modal.js';
+import { createTicketForm, createConfirmDialog } from './forms.js';
 
 export class HelpDeskApp {
   constructor() {
@@ -90,7 +91,6 @@ export class HelpDeskApp {
 
   async toggleStatus(ticket) {
     try {
-      // ОТПРАВЛЯЕМ ТОЛЬКО ИЗМЕНЯЕМОЕ ПОЛЕ — не трогаем description
       await TicketApi.updateTicket(ticket.id, {
         status: !ticket.status
       });
